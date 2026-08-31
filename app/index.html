@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <title>Camera PiP</title>
+    <style>
+        html, body {
+            margin: 0; padding: 0; width: 1920px; height: 1080px;
+            overflow: hidden;
+            font-family: "Samsung One", "Helvetica Neue", Arial, sans-serif;
+            /* Must stay transparent: the video plane is underneath. */
+            background: transparent;
+        }
+
+        #card {
+            position: absolute;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.75),
+                        0 0 0 3px rgba(255,255,255,0.28);
+        }
+
+        #card.full {
+            border-radius: 0;
+            box-shadow: none;
+            opacity: 0;
+            transition: opacity 260ms ease;
+        }
+        #card.full.visible { opacity: 1; }
+
+        /* A hole for the video plane: any opaque pixel here hides AVPlay. */
+        #card.avplay { background: transparent; box-shadow: none; }
+
+        /* In mosaic mode the card draws nothing itself. It only carries the
+           bar, legend, hint and countdown over whatever is showing the
+           picture. */
+        #card.mosaic {
+            background: transparent;
+            box-shadow: none;
+            border-radius: 0;
+        }
+        #card.mosaic #actions { bottom: 96px; }
+        #card.mosaic #hint { bottom: 42px; font-size: 24px; }
+
+        #tiles { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+        /* #tiles must never paint: it spans the screen, and the video plane is
+           under the whole graphics plane. main.js draws these around the lead
+           instead. */
+        .backdrop { position: absolute; background: #000; }
+        .tile {
+            position: absolute;
+            overflow: hidden;
+            background: #0b0b0b;
+            box-sizing: border-box;
+            /* Transparent, and never coloured: it is the gap between tiles,
+               which sit edge to edge in every tiled layout. */
+            border: 3px solid transparent;
+            border-radius: 8px;
+        }
+        .tile img { display: block; width: 100%; height: 100%; object-fit: contain; }
+        /* The player draws here. An opaque pixel hides it. */
+        .tile.lead { background: transparent; }
+        .tile .name {
+            position: absolute; left: 0; bottom: 0;
+            padding: 6px 14px;
+            background: rgba(0,0,0,0.62);
+            color: #fff; font-size: 22px;
+            border-top-right-radius: 8px;
+        }
+        .tile.lead .name {
+            left: 48px; top: 40px; bottom: auto;
+            padding: 8px 18px;
+            font-size: 28px;
+            border-radius: 8px;
+        }
+        .tile .dot {
+            display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+            background: #ff3b30; margin-right: 9px; vertical-align: middle;
+            animation: pulse 1.4s infinite;
+        }
+        #card.full #bar { height: 74px; line-height: 74px; font-size: 32px; padding: 0 40px; }
+        #card.full #hint { bottom: 28px; font-size: 24px; }
+
+        #bar {
+            position: absolute; left: 0; right: 0; top: 0;
+            height: 52px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.78), rgba(0,0,0,0));
+            color: #fff;
+            font-size: 25px;
+            line-height: 52px;
+            padding: 0 18px;
+            box-sizing: border-box;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.9);
+        }
+        #bar .dot {
+            display: inline-block;
+            width: 13px; height: 13px;
+            border-radius: 50%;
+            background: #ff3b30;
+            margin-right: 12px;
+            vertical-align: middle;
+            animation: pulse 1.4s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.25; }
+        }
+        #clock { float: right; opacity: 0.85; }
+
+        /* Driven by the D-pad: Samsung's slim remotes have no colour keys and
+           no separate Enter. */
+        #actions {
+            position: absolute; left: 0; right: 0; bottom: 42px;
+            text-align: center;
+            display: none;
+        }
+        #card.has-actions #actions { display: block; }
+        .act {
+            display: inline-block;
+            margin: 0 8px;
+            padding: 10px 22px;
+            border-radius: 8px;
+            font-size: 22px;
+            color: #fff;
+            background: rgba(0,0,0,0.65);
+            border: 2px solid rgba(255,255,255,0.35);
+            text-shadow: 0 2px 4px rgba(0,0,0,0.9);
+            transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+        }
+        .act.sel {
+            background: rgba(255,255,255,0.92);
+            color: #111;
+            border-color: #fff;
+            text-shadow: none;
+            transform: scale(1.06);
+        }
+        /* Bound to a key. It never carries a selection state. */
+        .act.bound {
+            background: rgba(0,0,0,0.55);
+            border-color: rgba(255,255,255,0.22);
+        }
+        .act .k {
+            display: inline-block;
+            min-width: 30px;
+            margin-right: 10px;
+            padding: 1px 7px;
+            border-radius: 5px;
+            background: rgba(255,255,255,0.92);
+            color: #111;
+            font-size: 19px;
+            font-weight: 700;
+            text-align: center;
+            text-shadow: none;
+            vertical-align: middle;
+        }
+        #card.full .act .k { font-size: 24px; min-width: 38px; }
+
+        .act.busy { opacity: 0.55; }
+        .act.done { background: #2f9e44; border-color: #2f9e44; color: #fff; text-shadow: none; }
+        .act.fail { background: #c92a2a; border-color: #c92a2a; color: #fff; text-shadow: none; }
+
+        #card.full .act { font-size: 28px; padding: 14px 30px; }
+        #card.full #actions { bottom: 76px; }
+
+        /* Countdown to auto-dismiss; main.js scales it on the X axis. */
+        #life {
+            position: absolute; left: 0; bottom: 0;
+            height: 5px; width: 100%;
+            background: rgba(255,255,255,0.85);
+            transform-origin: left center;
+        }
+
+        #hint {
+            position: absolute; left: 0; right: 0; bottom: 14px;
+            text-align: center;
+            color: rgba(255,255,255,0.92);
+            font-size: 19px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.9);
+            pointer-events: none;
+        }
+
+        #apps {
+            position: absolute; left: 0; top: 0;
+            width: 1920px; height: 1080px;
+            display: none;
+            background: #0f1216;
+            color: #eef2f6;
+        }
+        #apps.open { display: block; }
+        #appsTitle {
+            position: absolute; left: 72px; top: 52px;
+            font-size: 54px; font-weight: 600; letter-spacing: 0.3px;
+        }
+        #appsSub {
+            position: absolute; left: 74px; top: 126px;
+            font-size: 27px; color: #93a1b0;
+        }
+        #appsRule {
+            position: absolute; left: 72px; right: 72px; top: 180px;
+            height: 2px; background: rgba(255,255,255,0.13);
+        }
+        #appsFoot {
+            position: absolute; left: 0; right: 0; bottom: 44px;
+            text-align: center; font-size: 25px; color: #93a1b0;
+        }
+        .app {
+            position: absolute;
+            box-sizing: border-box;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            border-left: 5px solid rgba(122,180,248,0.5);
+            overflow: hidden;
+            white-space: nowrap;
+        }
+        .app.watched {
+            background: rgba(78,201,165,0.11);
+            border-left-color: #4ec9a5;
+        }
+        .app .aname {
+            display: block;
+            color: #f4f7fa;
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .app .aid {
+            display: block;
+            font-family: Menlo, Consolas, "Courier New", monospace;
+            color: #8ec7ff;
+            letter-spacing: 0.6px;
+        }
+        .app.watched .aid { color: #6fe3c0; }
+        .app .tag {
+            position: absolute; right: 16px; top: 50%;
+            margin-top: -15px;
+            height: 30px; line-height: 30px;
+            padding: 0 14px; border-radius: 15px;
+            font-size: 18px;
+            background: rgba(78,201,165,0.2); color: #6fe3c0;
+        }
+    </style>
+</head>
+<body>
+    <div id="tiles"></div>
+    <div id="card">
+        <div id="bar"><span id="barDot" class="dot"></span><span id="title">Camera</span><span id="clock"></span></div>
+        <div id="actions"></div>
+        <div id="hint"></div>
+        <div id="life"></div>
+    </div>
+    <div id="apps">
+        <div id="appsTitle"></div>
+        <div id="appsSub"></div>
+        <div id="appsRule"></div>
+        <div id="appsList"></div>
+        <div id="appsFoot"></div>
+    </div>
+    <script src="config.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>

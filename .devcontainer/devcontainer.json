@@ -1,0 +1,58 @@
+{
+  "name": "tizen-camera-pip",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": { "moby": false }
+  },
+  "postCreateCommand": "pre-commit install",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml",
+        "github.vscode-github-actions",
+        "timonwong.shellcheck",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "ruff.path": ["/usr/local/bin/ruff"],
+        "[python]": {
+          "editor.formatOnSave": true,
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+          }
+        },
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "files.eol": "\n",
+        "files.insertFinalNewline": true,
+        "files.trimTrailingWhitespace": true,
+        "[yaml]": { "editor.tabSize": 2 },
+        "[json]": { "editor.tabSize": 2 },
+        "[toml]": { "editor.tabSize": 2 },
+        "terminal.integrated.suggest.enabled": false,
+        "search.exclude": {
+          "dist": true,
+          "app/.buildResult": true
+        },
+        "yaml.schemaStore.enable": true,
+        "yaml.schemas": {
+          "https://json.schemastore.org/dependabot-2.0.json": ".github/dependabot.yml",
+          "https://json.schemastore.org/pre-commit-config.json": ".pre-commit-config.yaml"
+        },
+        "files.associations": {
+          ".pre-commit-config.yaml": "yaml",
+          "**/.github/**/*.yml": "yaml",
+          "*.yaml.example": "yaml",
+          "*.env.example": "ini"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,72 @@
+name: checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  static:
+    name: syntax and hygiene
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The ruff pins have to agree
+        run: |
+          set -euo pipefail
+          rev_of() { grep -A1 "$1" .pre-commit-config.yaml | sed -n 's/^ *rev: v//p'; }
+          pin="ruff==$(rev_of astral-sh/ruff-pre-commit)"
+          grep -qx "${pin}" .devcontainer/requirements.txt \
+            || { echo "${pin} is not in .devcontainer/requirements.txt" >&2; exit 1; }
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Cache pre-commit
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: ${{ runner.os }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: ${{ runner.os }}-pre-commit-
+      - name: Install pre-commit
+        run: |
+          set -euo pipefail
+          pin="$(grep -E '^pre-commit==' .devcontainer/requirements.txt)"
+          pip install "${pin}"
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure
+      - name: Parse the widget
+        run: node --check app/main.js
+      - name: Validate the producer stack
+        run: |
+          set -euo pipefail
+          cp hls-producer/.env.example hls-producer/.env
+          docker compose -f hls-producer/docker-compose.yaml.example --env-file hls-producer/.env config >/dev/null
+
+  image:
+    name: the image packages a widget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # Build only. Publishing happens on a tag, in image.yml.
+      - name: Build the Tizen CLI image
+        run: docker build -t tizen-cli:ci docker/
+      # No TV address: the container stops after signing.
+      - name: Package the widget with it
+        run: |
+          set -euo pipefail
+          # The container runs as uid 1000 and the runner is not that uid. The
+          # output directory has to be writable by both.
+          mkdir -p dist && chmod 777 dist
+          docker run --rm -v "$PWD:/work:ro" -v "$PWD/dist:/out" tizen-cli:ci
+          test -s dist/CameraPip.wgt

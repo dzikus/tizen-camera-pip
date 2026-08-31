@@ -1,0 +1,206 @@
+# HLS for the TV app, one producer per camera. Copy to docker-compose.yaml on
+# the camera host, copy .env.example to .env, and edit both.
+#
+# Why this exists: go2rtc's HLS window is hardcoded to two segments. A joining
+# player then waits for the rest of its buffer to be produced in real time.
+# These playlists already hold it. See "Time to picture" in README.md for the
+# measurements.
+
+networks:
+  hls-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.20.4.0/28
+
+x-producer: &producer
+  image: lscr.io/linuxserver/ffmpeg:latest
+  restart: unless-stopped
+  environment:
+    TZ: Europe/Warsaw
+  volumes:
+    - hls:/hls
+  depends_on:
+    camera-config:
+      condition: service_started
+  mem_limit: 192m
+  cpus: 0.5
+  pids_limit: 64
+  oom_score_adj: 0
+
+services:
+  # Runs once at stack start and then sleeps. The camera keeps these settings by
+  # itself; this exists to stop a factory reset quietly bringing back long
+  # keyframes or PCM audio. Dahua CGI shown; adapt to your make.
+  camera-config:
+    image: curlimages/curl:latest
+    container_name: hls-config
+    restart: unless-stopped
+    networks:
+      hls-network:
+        ipv4_address: 10.20.4.4
+    environment:
+      TZ: Europe/Warsaw
+      CAM_USER: ${CAM_USER}
+      CAM_PASS: ${CAM_PASS}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -u
+        C="--digest -u $${CAM_USER}:$${CAM_PASS} -s -g --max-time 15"
+        B="cgi-bin/configManager.cgi?action=setConfig"
+        G="cgi-bin/configManager.cgi?action=getConfig&name=Encode"
+
+        # GOP is read from the stream's own FPS, never hardcoded: streams differ
+        # in frame rate, and one fixed value would mean a keyframe every fifth
+        # of a second on some of them.
+        gop() {
+          FPS=$$(curl $$C "http://$$1/$$G" | tr -d '\r' \
+                 | sed -n "s/^table.Encode\[0\].$$2\[0\].Video.FPS=//p" | head -1)
+          if [ -z "$$FPS" ]; then echo "$$3 $$1 $$2: no FPS, skipped"; return; fi
+          echo "$$3 $$1 $$2: FPS=$$FPS -> GOP=$$FPS"
+          curl $$C "http://$$1/$$B&Encode[0].$$2[0].Video.GOP=$$FPS"; echo ""
+        }
+
+        aac() {
+          echo "$$3 $$1 $$2: AAC, audio on"
+          curl $$C "http://$$1/$$B&Encode[0].$$2[0].Audio.Compression=AAC"; echo ""
+          curl $$C "http://$$1/$$B&Encode[0].$$2[0].AudioEnable=true"; echo ""
+        }
+
+        # Second-long keyframes only where a player joins. On a recording stream
+        # they would cost picture quality and speed up nothing.
+        gop 192.168.1.11 MainFormat  doorbell
+        gop 192.168.1.12 ExtraFormat drive
+
+        aac 192.168.1.11 MainFormat  doorbell
+        aac 192.168.1.11 ExtraFormat doorbell
+        aac 192.168.1.12 MainFormat  drive
+        aac 192.168.1.12 ExtraFormat drive
+        echo "done"
+        exec sleep infinity
+    mem_limit: 32m
+    cpus: 0.1
+    pids_limit: 16
+    oom_score_adj: 200
+
+  # Reading go2rtc's restream, not the camera, keeps its concurrent RTSP
+  # sessions down; a doorbell station will start refusing the extra one.
+  # Audio is re-encoded: cameras send 8-16 kHz, which AVPlay will not output.
+  # Add a gain only where the source is genuinely quiet.
+  doorbell:
+    <<: *producer
+    container_name: hls-doorbell
+    networks:
+      hls-network:
+        ipv4_address: 10.20.4.5
+    command:
+      - -hide_banner
+      - -loglevel
+      - warning
+      - -rtsp_transport
+      - tcp
+      - -i
+      - rtsp://camera-host:8554/doorbell
+      - -map
+      - 0:v:0
+      - -map
+      - 0:a:0?
+      - -c:v
+      - copy
+      - -af
+      - volume=20dB,aresample=async=1
+      - -c:a
+      - aac
+      - -b:a
+      - 128k
+      - -ar
+      - "44100"
+      - -ac
+      - "2"
+      - -f
+      - hls
+      - -hls_time
+      - "1"
+      - -hls_list_size
+      - ${HLS_LIST_SIZE:-6}
+      - -hls_flags
+      - delete_segments+omit_endlist+independent_segments
+      - -hls_segment_type
+      - mpegts
+      - -hls_segment_filename
+      - /hls/doorbell_%05d.ts
+      - /hls/doorbell.m3u8
+
+  drive:
+    <<: *producer
+    container_name: hls-drive
+    networks:
+      hls-network:
+        ipv4_address: 10.20.4.6
+    command:
+      - -hide_banner
+      - -loglevel
+      - warning
+      - -rtsp_transport
+      - tcp
+      - -i
+      - rtsp://camera-host:8554/drive
+      - -map
+      - 0:v:0
+      - -map
+      - 0:a:0?
+      - -c:v
+      - copy
+      - -af
+      - aresample=async=1
+      - -c:a
+      - aac
+      - -b:a
+      - 128k
+      - -ar
+      - "44100"
+      - -ac
+      - "2"
+      - -f
+      - hls
+      - -hls_time
+      - "1"
+      - -hls_list_size
+      - ${HLS_LIST_SIZE:-6}
+      - -hls_flags
+      - delete_segments+omit_endlist+independent_segments
+      - -hls_segment_type
+      - mpegts
+      - -hls_segment_filename
+      - /hls/drive_%05d.ts
+      - /hls/drive.m3u8
+
+  server:
+    image: nginx:alpine
+    container_name: hls-server
+    restart: unless-stopped
+    networks:
+      hls-network:
+        ipv4_address: 10.20.4.7
+    ports:
+      - "8090:80"
+    environment:
+      TZ: Europe/Warsaw
+    volumes:
+      - hls:/usr/share/nginx/html:ro
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 32
+    oom_score_adj: 0
+
+# A named volume, not a per-service tmpfs: every container needs the same
+# files. In RAM - every segment is rewritten each second, all day.
+volumes:
+  hls:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=256m

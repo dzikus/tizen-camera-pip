@@ -1,0 +1,8 @@
+# Local configuration and what it compiles to. Addresses stay out of the repo.
+app/config.yaml
+app/config.js
+hls-producer/.env
+
+# Build output
+dist/
+app/.buildResult/

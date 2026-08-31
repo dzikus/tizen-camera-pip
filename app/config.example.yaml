@@ -1,0 +1,145 @@
+# Copy to config.yaml and edit. The build container compiles it into the
+# config.js the app loads; never edit that by hand. Every key is optional.
+
+# One to four cameras, composed into a mosaic on the TV. Each takes three URLs,
+# one per job:
+#   videoUrl    H.264 with AAC, decoded in hardware. The player uses this
+#               everywhere: full screen in lean mode, and in the leading tile of
+#               the mosaic. With neither this nor hlsUrl there is no player: the
+#               leading tile stays empty and lean mode leaves the screen dark.
+#   mjpegUrl    the small mosaic tiles, the only pictures the app decodes itself
+#   hlsUrl      a fallback, used only when a camera has no videoUrl
+#
+# Serve videoUrl from a producer that keeps several segments in its playlist.
+# go2rtc's own HLS window is two segments, and the player then waits for media
+# in real time - seconds, not one. See "Time to picture" in README.md.
+primaryCamera: 0
+cameras:
+  - name: "Front door"
+    videoUrl:   "http://camera-host:8090/front.m3u8"
+    mjpegUrl:   "http://camera-host:5000/api/front?h=360&fps=3"
+    hlsUrl:     "http://camera-host:5000/api/go2rtc/api/stream.m3u8?src=front_audio"
+
+# mosaicStyle: overlay puts the small tiles over a full-screen lead; tiled gives
+# every camera its own tile, the leading one no smaller than the rest.
+mosaicStyle: tiled
+overlayTile: { w: 480, h: 270, margin: 48, gap: 24 }
+sound: true
+
+# With another app on screen, show one camera through the hardware decoder. The
+# platform then leaves that app alone.
+leanWhenAppRunning: true
+# How long to wait for every watched app to answer. A deadline that expires with
+# a question outstanding counts as unknown and the app stays lean, showing one
+# camera where the mosaic would have gone. See "Deciding whether to go lean" in
+# README.md.
+soundProbeMs: 1500
+# The applications whose presence on screen turns lean mode on. This list is the
+# whole of it - nothing is discovered - and an application missing from it gets
+# the full mosaic and may be killed for it. The red key lists what is installed,
+# with the ids to copy in here; only the numeric form ever answers.
+watchApps: []
+# Never listed on that screen.
+ignoreApps: []
+
+# Identity on the TV's remote-control channel. The app list comes from there.
+# The name is the row the TV shows under General > External Device Manager
+# > Device Connection Manager, and that row decides whether the app is allowed.
+# The connection that raises the prompt is refused whatever the viewer answers.
+# The app reconnects once by itself. The token is a port-8002 mechanism and is
+# probably ignored on 8001; it stays to survive an install.
+remoteName: "camera-pip"
+remoteToken: ""
+# How long the red-key screen waits for the TV. Generous: the set may be holding
+# the connection while it asks the viewer to allow the device.
+appListTimeoutMs: 30000
+
+# showName and showDot cover the top bar and the tile badges; with showClock off
+# as well the bar draws nothing and is hidden. showHint is the key legend along
+# the bottom and is separate from all three.
+showName: true
+showDot: true
+showClock: true
+showHint: true
+
+showLegend: auto
+hintText: "RETURN - close"
+
+# Which glyph the legend prints for a key an action is bound to. The keys of
+# this map are also the values `key:` accepts above.
+keyGlyphs: { up: "▲", down: "▼", left: "◀", right: "▶", ok: "OK", playpause: "⏯" }
+
+# Every string the app puts on screen. In appsFoot, %n is the entry count, %p
+# the page and %t the page count.
+text:
+  camKey: "camera"
+  okKey: "run"
+  closeKey: "close"
+  appsTitle: "Applications this TV knows"
+  appsSub: "Copy an id into watchApps in config.yaml"
+  appsEmpty: "Nothing installed that this TV will show."
+  appsFoot: "%n apps, page %p of %t   |   ◀ ▶ - page   |   OK, RETURN or RED - close"
+  appsFailed: "The TV would not list its applications."
+  appsUnauthorized: "The TV refused this app twice. Allow it under General - External Device Manager - Device Connection Manager."
+  tagWatched: "watched"
+
+dismissAfter: 45      # seconds on screen; 0 = stay until dismissed
+lifeBar: { show: true, position: top }
+
+# The app posts the action id and the layout it is in. What the id means is the
+# receiver's to decide.
+actionUrl: "http://homeassistant.local:8123/api/webhook/camera_pip_action"
+actions:
+  - id: gate
+    label: "Open gate"
+    key: up
+    closeAfter: true
+
+# Which keys close the app. Play and pause are not among them.
+closeKeys: [return, exit]
+
+# Posted when the app takes the screen and when it hands it back. The receiver
+# is yours to write; the example package under homeassistant/ does not define
+# one, and the screen comes back without it.
+openWebhook: null
+closeWebhook: "http://homeassistant.local:8123/api/webhook/camera_pip_close"
+
+# Too short and the TV lands on its input with the Smart Hub bar instead of
+# going back to the app the viewer came from.
+exitDelayMs: 1200
+# Keys are ignored for this long after a launch.
+inputGraceMs: 900
+
+# Without debugUrl the app logs nothing at all: the trace only ever leaves in a
+# report, and this TV has no inspector to print to.
+debugUrl: "http://192.168.1.100:8099/log"
+# Sample free memory every N ms; 0 leaves it alone. 500 while measuring - at one
+# sample per second the real floor falls between two readings - but it is ninety
+# lines a run, which pushes the events out of the trace.
+memorySampleMs: 0
+
+# On screen with nothing drawn and no player, sampling memory: the baseline to
+# compare anything else against.
+diagnoseOnly: false
+diagnoseMs: 20000
+
+# The corner layouts need tvwindow, which unloads the app on some models; a fuse
+# turns them off automatically after two failures.
+layout: fullscreen
+
+corner: top-right
+margin: 56
+smallSize: { w: 600, h: 338 }
+largeSize: { w: 1180, h: 664 }
+startEnlarged: false
+sourceWindow: { corner: top-right, margin: 56, w: 640, h: 360 }
+# Only read by the corner layouts. tvWindowZ is handed to tvwindow.show() in
+# camera-corner; source-corner always uses FRONT. preferSource matches one of
+# the sources the set reports, by its type and number, and forceSetSource
+# re-selects it even when it is already the live one.
+tvWindowZ: BEHIND
+preferSource: null
+forceSetSource: false
+tvWindowFuse: true
+tvWindowFuseTrips: 2
+tvWindowSettleMs: 8000

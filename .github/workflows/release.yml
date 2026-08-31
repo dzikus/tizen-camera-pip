@@ -1,0 +1,44 @@
+name: release
+on:
+  push:
+    tags: ["v*.*.*"]
+permissions:
+  contents: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    name: package the widget and publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      # persist-credentials: false keeps the write-scoped token out of .git,
+      # beyond the reach of the toolchain below. gh authenticates through
+      # GH_TOKEN.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # Built with no cameras, not from config.example.yaml: that file carries a
+      # debugUrl and two webhook addresses. Shows nothing until config.yaml is
+      # filled in and it is rebuilt.
+      - name: Package the widget
+        run: |
+          set -euo pipefail
+          # The container runs as uid 1000 and the runner is not that uid.
+          mkdir -p dist && chmod 777 dist
+          printf 'cameras: []\n' > app/config.yaml
+          docker build -t tizen-cli:release docker/
+          docker run --rm -v "$PWD:/work:ro" -v "$PWD/dist:/out" tizen-cli:release
+          ls -la dist/
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes \
+            dist/*.wgt

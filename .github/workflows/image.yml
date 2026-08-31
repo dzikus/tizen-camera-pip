@@ -1,0 +1,43 @@
+name: image
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    name: publish the Tizen CLI image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # Plain docker. The login and build-push actions would be two more
+      # third-party actions to pin and keep pinned, for three commands.
+      - name: Log in to ghcr.io
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/tizen-cli"
+          # A tag publishes the version without its leading v. A hand-started
+          # run publishes under its branch name, with slashes turned into
+          # dashes, which a docker tag does not allow.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            PRIMARY="${GITHUB_REF_NAME#v}"
+          else
+            PRIMARY="${GITHUB_REF_NAME//\//-}"
+          fi
+          docker build -t "$IMAGE:$PRIMARY" docker/
+          docker push "$IMAGE:$PRIMARY"
+          # latest is what build-install.sh pulls, and it follows releases only.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            docker tag "$IMAGE:$PRIMARY" "$IMAGE:latest"
+            docker push "$IMAGE:latest"
+          fi

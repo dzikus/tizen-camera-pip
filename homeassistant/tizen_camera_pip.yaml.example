@@ -1,0 +1,85 @@
+# tizen-camera-pip - example Home Assistant package.
+#
+# Drop into config/packages/ (needs `packages: !include_dir_named packages`
+# under `homeassistant:` in configuration.yaml), replace the placeholders,
+# then reload YAML.
+#
+# This is an EXAMPLE, not a dependency. The app needs nothing but HTTP
+# endpoints; any web server or automation system can provide them.
+#
+# HA launches the app and answers its action webhook. Nothing here restores the
+# screen afterwards: exit() hands it back to whatever was in front, which is the
+# only mechanism that has been seen to work.
+#
+# The app is NOT launched over REST. /api/v2/applications/<id> only lists the
+# most recently installed sideloaded app and returns 404 for the rest;
+# media_player.play_media with type "app" goes over the WebSocket channel,
+# which works regardless.
+
+# Replace <TV> with your samsungtv_smart media_player and <APP_ID> with the
+# Tizen app id, CamPip0001.CameraPip.
+
+automation:
+  - id: camera_pip_on_ring
+    alias: "Camera PiP - show on event"
+    mode: single
+    max_exceeded: silent
+    triggers:
+      # Replace with your own doorbell / motion trigger.
+      - trigger: state
+        entity_id: binary_sensor.doorbell
+        to: "on"
+    conditions:
+      # Only when the TV is on.
+      - condition: state
+        entity_id: media_player.<TV>
+        state: "on"
+    actions:
+      - action: media_player.play_media
+        target:
+          entity_id: media_player.<TV>
+        data:
+          media_content_type: app
+          media_content_id: <APP_ID>
+
+      # Swallow repeat events from the same ring.
+      - delay:
+          seconds: 8
+
+  # The app sends an action id and its layout; what the ids mean lives here, and
+  # the app stays portable.
+  - id: camera_pip_action
+    alias: "Camera PiP - action from the TV remote"
+    mode: queued
+    max: 5
+    triggers:
+      - trigger: webhook
+        webhook_id: camera_pip_action
+        allowed_methods:
+          - POST
+        local_only: true
+    actions:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.json.action == 'gate' }}"
+            sequence:
+              # Replace with whatever opens your gate.
+              - action: switch.turn_on
+                target:
+                  entity_id: switch.gate
+
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.json.action == 'driveway' }}"
+            sequence:
+              - action: cover.open_cover
+                target:
+                  entity_id: cover.driveway
+
+        default:
+          - action: system_log.write
+            data:
+              level: warning
+              logger: tizen_camera_pip
+              message: "Unknown action from TV: {{ trigger.json.action | default('?') }}"
