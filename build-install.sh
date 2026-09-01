@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build, sign and install a Tizen web app on a Samsung TV in developer mode.
+# Build, sign and install Tizen web apps on a Samsung TV in developer mode.
 #
 # Everything runs inside this repository's own image, published by its CI.
 # Docker is all this host needs. The image signs with the SDK's PUBLIC
@@ -8,11 +8,16 @@
 # more.
 #
 # Usage:
-#   ./build-install.sh <TV_IP> [APP_DIR]
+#   ./build-install.sh <TV_IP> [target ...]
+#
+# A target is a widget directory in this repository or a prebuilt .wgt anywhere
+# on this machine. Options bind to the target that follows: --package-id,
+# --required-version, --replace. See docker/entrypoint.sh.
 #
 # Example:
-#   ./build-install.sh 192.168.1.50          # the camera app
-#   ./build-install.sh 192.168.1.50 <dir>    # any other widget directory here
+#   ./build-install.sh 192.168.1.50                        # the camera app
+#   ./build-install.sh 192.168.1.50 <dir>                  # another widget here
+#   ./build-install.sh 192.168.1.50 ~/Downloads/App.wgt    # somebody else's build
 #
 # Prerequisites on the TV:
 #   Apps -> 12345 -> Developer mode ON -> enter this host's IP -> restart TV
@@ -20,17 +25,43 @@
 set -euo pipefail
 
 TV_IP="${1:-}"
-APP_DIR="${2:-app}"
 
 if [ -z "$TV_IP" ]; then
-    echo "Usage: $0 <TV_IP> [APP_DIR]" >&2
+    echo "Usage: $0 <TV_IP> [target ...]" >&2
     exit 1
 fi
+shift
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [ ! -f "$REPO_ROOT/$APP_DIR/config.xml" ]; then
-    echo "No config.xml in '$APP_DIR' - is that a Tizen web app directory?" >&2
+ARGS=()
+MOUNTS=()
+MOUNTED=""
+for arg in "$@"; do
+    case "$arg" in
+        *.wgt)
+            if [ ! -f "$arg" ]; then
+                echo "No such package: $arg" >&2
+                exit 1
+            fi
+            dir="$(cd "$(dirname "$arg")" && pwd)"
+            ARGS+=("$dir/$(basename "$arg")")
+            case ":${MOUNTED}:" in
+                *":${dir}:"*) ;;
+                *)
+                    MOUNTS+=(-v "$dir:$dir:ro")
+                    MOUNTED="${MOUNTED}:${dir}"
+                    ;;
+            esac
+            ;;
+        *)
+            ARGS+=("$arg")
+            ;;
+    esac
+done
+
+if [ "${#ARGS[@]}" -eq 0 ] && [ ! -f "$REPO_ROOT/app/config.xml" ]; then
+    echo "No config.xml in 'app' - is that a Tizen web app directory?" >&2
     exit 1
 fi
 
@@ -65,15 +96,16 @@ fi
 
 mkdir -p "$REPO_ROOT/dist"
 
-echo "==> TV:    $TV_IP"
-echo "==> App:   $APP_DIR"
-echo "==> Image: $IMAGE"
+echo "==> TV:      $TV_IP"
+echo "==> Targets: ${ARGS[*]:-app}"
+echo "==> Image:   $IMAGE"
 echo
 
 docker run --rm --network host \
     -v "$REPO_ROOT:/work:ro" \
     -v "$REPO_ROOT/dist:/out" \
-    "$IMAGE" "$TV_IP" "$APP_DIR"
+    "${MOUNTS[@]}" \
+    "$IMAGE" "$TV_IP" "${ARGS[@]}"
 
 echo
 echo "==> Done. The .wgt is in dist/"

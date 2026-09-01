@@ -2,9 +2,8 @@
 """
 Launch (or list) apps on a Samsung Tizen TV over its remote-control WebSocket.
 
-This is the same channel the TV's own mobile remote uses. POST
-/api/v2/applications/<id> is no use here: the set exposes only the most recently
-installed sideloaded app and answers 404 for the rest.
+This is the same channel the TV's own mobile remote uses, and it takes the real
+application id.
 
 Only websocket-client is required. No Home Assistant, no vendor SDK.
 
