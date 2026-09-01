@@ -11,10 +11,8 @@
 # screen afterwards: exit() hands it back to whatever was in front, which is the
 # only mechanism that has been seen to work.
 #
-# The app is NOT launched over REST. /api/v2/applications/<id> only lists the
-# most recently installed sideloaded app and returns 404 for the rest;
-# media_player.play_media with type "app" goes over the WebSocket channel,
-# which works regardless.
+# media_player.play_media with type "app" goes over the remote-control channel
+# and takes the real application id.
 
 # Replace <TV> with your samsungtv_smart media_player and <APP_ID> with the
 # Tizen app id, CamPip0001.CameraPip.

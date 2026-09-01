@@ -79,16 +79,38 @@ To build the widget without a TV, run the image with no address:
 docker run --rm -v "$PWD:/work:ro" -v "$PWD/dist:/out" tizen-cli:local
 ```
 
+The image installs prebuilt packages as well as the widget in this repository.
+A target is a widget directory here or a `.wgt` anywhere on this machine, and
+several of them go in one run:
+
+```bash
+./build-install.sh <TV_IP> app --replace ~/Downloads/Jellyfin.wgt
+```
+
+An option binds to the target after it. `--package-id` replaces the
+ten-character package id, `--required-version` replaces the platform floor the
+manifest asks for, and `--replace` uninstalls that application id first. A
+released `.wgt` carries whoever built it in its signature, or carries no
+signature at all; either way it is unpacked, stripped and signed with this
+image's certificate before it reaches the set.
+
 `docker/author.p12` is in this repository on purpose, and every build of the
 image signs with it. A set refuses to replace a package signed by a different
-author - `install failed[118012]` - and refuses to uninstall that package too.
-The only way back is deleting the app on the TV itself. An image that minted
-its own certificate per build would do that to everyone on every release. The
-key grants nothing: privileges come from the distributor certificate, which
-ships in every copy of Tizen Studio.
+author - `install failed[118012]`. An image that minted its own certificate per
+build would do that to everyone on every release. The key grants nothing:
+privileges come from the distributor certificate, which ships in every copy of
+Tizen Studio.
 
-If a widget signed elsewhere is already installed under the same id, that first
-install still needs the app deleted on the TV. Once.
+If a widget signed elsewhere is already installed under the same id, remove it
+first. `--replace` does that, and it worked here on a package carrying somebody
+else's author signature; where it does not, delete the app on the TV. Once,
+either way.
+
+The same code comes back for a second reason: a set that turns a package id
+down outright, with nothing installed under it. A two-file widget carrying such
+an id was refused in well under a second while the same widget under a fresh id
+installed, on one certificate throughout. `--package-id` gives it ten other
+characters.
 
 Launch it over the remote-control WebSocket. This is the one step outside the
 container, and it needs `websocket-client`:
@@ -113,9 +135,9 @@ next one. The app reconnects once by itself.
 exists only because an install wipes `localStorage`. To pin one, read it out of
 the debug trace - `app channel: token issued` - which needs `debugUrl` set.
 
-REST cannot be used to launch, because the TV exposes only one sideloaded app at
-a time over `POST /api/v2/applications/<id>`, the most recently installed, and
-404s for the rest. The WebSocket launches any installed app by its real id.
+The TV's own REST API launches it as well: `POST /api/v2/applications/<id>`
+answers 200 and the widget comes up, measured with this one sideloaded app
+installed. The WebSocket takes the same id and is what this project uses.
 
 ### On an event, from Home Assistant
 
@@ -131,8 +153,10 @@ The same channel, called by an automation instead of by hand:
 ```
 
 The `media_player` entity has to come from an integration that speaks the
-remote-control WebSocket; this setup uses `samsungtv_smart`. The example fires
-only while the TV is on, and guards the call with a state condition.
+remote-control WebSocket. This setup runs `samsungtv_smart` 0.14.5, the custom
+integration installed through HACS; the built-in `samsungtv` integration is
+untested here. The example fires only while the TV is on, and guards the call
+with a state condition.
 
 `homeassistant/tizen_camera_pip.yaml.example` is a working package: that call on
 a doorbell trigger, and a webhook that answers the on-screen actions.
