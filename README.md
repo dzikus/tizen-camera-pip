@@ -131,9 +131,9 @@ prompt is refused whatever the viewer answers, and accepting it authorises the
 next one. The app reconnects once by itself.
 
 `remoteToken` does not have to be filled in. The app is handed a token on
-`ms.channel.connect` and keeps it in `localStorage` by itself; the config key
-exists only because an install wipes `localStorage`. To pin one, read it out of
-the debug trace - `app channel: token issued` - which needs `debugUrl` set.
+`ms.channel.connect` and keeps it in `localStorage`, which an install leaves
+alone. The config key pins one of your own. To find it, read it out of the
+debug trace - `app channel: token issued` - which needs `debugUrl` set.
 
 The TV's own REST API launches it as well: `POST /api/v2/applications/<id>`
 answers 200 and the widget comes up, measured with this one sideloaded app
@@ -330,9 +330,15 @@ one video plane: without a video mixer the second player puts the first into
 documented "only for product B2B" and throw `TypeMismatchError` on this set.
 One hardware picture at a time.
 
-`setDisplayRect()` does work. Given a 960x540 rectangle the picture stayed
-inside it, confirmed on screen. The leading mosaic tile is the player,
-positioned into that tile.
+`setDisplayRect()` does work, with `PLAYER_DISPLAY_MODE_FULL_SCREEN`. Given a
+960x540 rectangle the picture stayed inside it, confirmed on screen. Under
+`PLAYER_DISPLAY_MODE_LETTER_BOX` the same call is accepted and reports no
+error, and a rectangle smaller than the screen is ignored. The leading mosaic
+tile is the player, positioned into that tile.
+
+A stream that signals no pixel aspect is drawn at its coded ratio: a 16:9 view
+encoded as 704x576 comes out at 1.22:1. Per camera, `aspect` gives the real
+ratio and the picture is fitted to it.
 
 ## What the TV will tell an app
 
@@ -368,10 +374,11 @@ Press the red key to see what to put there: the applications the TV lists, minus
 the platform's own entries and background workers, each with its id. The screen
 has no timeout; OK, RETURN or the red key closes it.
 
-Two ids exist for every application and only one of them works. The installed
-package form, `RN1MCdNq8t.Netflix`, answers `visible:false` even with Netflix on
+A store application carries two ids and only one of them answers. The installed
+package form, `RN1MCdNq8t.Netflix`, reports `visible:false` even with Netflix on
 screen; the launchable numeric form, `11101200001`, is the one that answers. The
-red-key screen lists the numeric form.
+red-key screen lists the numeric form. A sideloaded app has one id and it
+answers: `AprZAARz4r.Jellyfin` reported `visible:true` while it was on screen.
 
 Unless every watched app has replied by the deadline, the result is treated as
 unknown and the app stays lean. One fast "not visible" while five probes are

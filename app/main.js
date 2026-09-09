@@ -34,8 +34,8 @@ var DEFAULTS = {
     // Identity on the remote-control channel. The name is the row the TV shows
     // under Device Connection Manager, and it decides what has to be allowed
     // there. The token belongs to websocketsecure on 8002 and may well be
-    // ignored on 8001; it sits here to survive an install, which localStorage
-    // does not, and an ignored parameter costs nothing.
+    // ignored on 8001. The app keeps the one it is handed in localStorage,
+    // which an install leaves alone; this key pins one of your own.
     remoteName: 'camera-pip',
     remoteToken: null,
     // How long the foreground probe waits for every watched app to answer.
@@ -443,7 +443,8 @@ var player = {
     active: false,
     used: false,
     failed: false,
-    restarts: 0
+    restarts: 0,
+    gen: 0
 };
 
 /*
@@ -479,13 +480,48 @@ function playerCapabilities() {
  * Recomputed on every call, never captured: the lean verdict lands after the
  * player has started.
  */
+// A stream that signals no pixel aspect is drawn at its coded ratio: a 16:9
+// view encoded as 704x576 comes out at 1.22:1.
+function cameraAspect(cam) {
+    var a = cam && cam.aspect;
+    if (!a) { return 0; }
+    var parts = String(a).split(/[:\/x]/);
+    if (parts.length === 2) {
+        var w = parseFloat(parts[0]), h = parseFloat(parts[1]);
+        return (w > 0 && h > 0) ? w / h : 0;
+    }
+    var n = parseFloat(a);
+    return n > 0 ? n : 0;
+}
+
+function fitToAspect(r, aspect) {
+    if (!aspect) { return r; }
+    var w = r[2], h = r[3];
+    if (w / h > aspect) { w = Math.round(h * aspect); }
+    else { h = Math.round(w / aspect); }
+    return [r[0] + Math.round((r[2] - w) / 2),
+            r[1] + Math.round((r[3] - h) / 2), w, h];
+}
+
 function playerRect() {
-    return tileRects(cameraList().length)[0];
+    return fitToAspect(tileRects(cameraList().length)[0],
+                       cameraAspect(currentCamera()));
+}
+
+// LETTER_BOX ignores a rect smaller than the screen here: full screen lands
+// exactly, a mosaic tile does not.
+function displayMethod(r) {
+    // fitToAspect has already shaped the rect; the picture is stretched to it.
+    if (cameraAspect(currentCamera())) { return 'PLAYER_DISPLAY_MODE_FULL_SCREEN'; }
+    return (r[0] === 0 && r[1] === 0 && r[2] === SCREEN_W && r[3] === SCREEN_H)
+        ? 'PLAYER_DISPLAY_MODE_LETTER_BOX'
+        : 'PLAYER_DISPLAY_MODE_FULL_SCREEN';
 }
 
 function applyPlayerRect() {
     var r = playerRect();
     try {
+        webapis.avplay.setDisplayMethod(displayMethod(r));
         webapis.avplay.setDisplayRect(r[0], r[1], r[2], r[3]);
     } catch (e) { log('setDisplayRect failed: ' + e.name); }
 }
@@ -497,20 +533,97 @@ function startAvplayAt(url, onFail) {
     // and it is most of the delay before a picture appears.
     var startedAt = new Date().getTime();
     var prepareFrom = 0;
+    var prepared = false;
+    var readyTimer = null;
+    var gen = ++player.gen;
+
+    function superseded(where) {
+        if (gen === player.gen) { return false; }
+        log('avplay: ' + where + ' from a superseded player, ignored');
+        return true;
+    }
+
+    // Runs once, from whichever of the three routes below arrives first.
+    function afterPrepare(via) {
+        if (prepared || superseded('a prepare')) { return; }
+        prepared = true;
+        stopTimer(readyTimer);
+        readyTimer = null;
+        log('avplay: prepared via ' + via + ', ' +
+            (new Date().getTime() - prepareFrom) + ' ms, total ' +
+            (new Date().getTime() - startedAt) + ' ms');
+
+        // Method before rect, and both again here: the rect is accepted in
+        // READY state without being applied.
+        var wanted = playerRect();
+        var rectDiag = { wanted: wanted, via: via, method: displayMethod(wanted) };
+        try {
+            webapis.avplay.setDisplayMethod(rectDiag.method);
+        } catch (e) { rectDiag.method += ' FAILED ' + e.name + ': ' + e.message; }
+        try {
+            webapis.avplay.setDisplayRect(wanted[0], wanted[1], wanted[2], wanted[3]);
+            rectDiag.rect = 'ok';
+        } catch (e) { rectDiag.rect = 'FAILED ' + e.name + ': ' + e.message; }
+        try { rectDiag.state = webapis.avplay.getState(); } catch (e) { /* ignore */ }
+        rectDiag.page = [SCREEN_W, SCREEN_H];
+        try { rectDiag.screen = [window.screen.width, window.screen.height]; }
+        catch (e) { /* ignore */ }
+        try { rectDiag.stream = webapis.avplay.getCurrentStreamInfo(); }
+        catch (e) { rectDiag.stream = 'FAILED ' + e.name; }
+        report('avplay-rect', rectDiag);
+
+        // The player now carries the picture in both branches: sound:false
+        // mutes it and does not stop it being opened.
+        takeMute(!view.sound);
+        try { webapis.avplay.play(); } catch (e) { log('avplay: play() ' + e.name); }
+
+        // Keep re-applying until PLAYING, then confirm once.
+        stopTimer(settleTimer);
+        var tries = 0;
+        var lastErr = null;
+        settleTimer = repeat(function () {
+            if (gen !== player.gen) { stopTimer(settleTimer); settleTimer = null; return; }
+            tries++;
+            var st = '';
+            try { st = webapis.avplay.getState(); } catch (e) { st = 'state? ' + e.name; }
+            // Reported, never swallowed: a refusal here is the reason
+            // the picture would sit in the wrong place. Re-read each tick:
+            // a lean verdict arriving mid-settle then moves the picture.
+            var now = playerRect();
+            try {
+                webapis.avplay.setDisplayRect(now[0], now[1], now[2], now[3]);
+                lastErr = null;
+            } catch (e) {
+                lastErr = e.name + ': ' + e.message;
+            }
+            if (st === 'PLAYING' || tries > 20) {
+                stopTimer(settleTimer);
+                settleTimer = null;
+                report('avplay-rect-settled',
+                       { state: st, tries: tries, rect: now, rectError: lastErr });
+            }
+        }, 300);
+        player.active = true;
+        player.used = true;
+        log('avplay: playing, sound ' + (view.sound ? 'on' : 'muted'));
+        report('avplay-playing', {});
+    }
+
     try {
         webapis.avplay.open(url);
         log('avplay: open() ' + (new Date().getTime() - startedAt) + ' ms');
         player.opened = true;
 
-        // Before prepare(), per Samsung's sample. It is also accepted in READY
-        // and in PLAYING; setting it here means the first frame lands in place.
-        try { webapis.avplay.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX'); } catch (e) { /* ignore */ }
         applyPlayerRect();
         webapis.avplay.setListener({
             onbufferingstart: function () { log('avplay: buffering'); },
-            onbufferingcomplete: function () { log('avplay: buffered'); },
+            onbufferingcomplete: function () {
+                log('avplay: buffered');
+                afterPrepare('buffered');
+            },
             onstreamcompleted: function () { log('avplay: stream ended'); },
             onerror: function (e) {
+                if (superseded('an error')) { return; }
                 log('avplay error: ' + e);
                 report('avplay-error', { error: String(e) });
                 if (player.active) { restartPlayer(); return; }
@@ -520,61 +633,39 @@ function startAvplayAt(url, onFail) {
         });
         prepareFrom = new Date().getTime();
         webapis.avplay.prepareAsync(function () {
-            log('avplay: prepareAsync ' + (new Date().getTime() - prepareFrom) +
-                ' ms, total ' + (new Date().getTime() - startedAt) + ' ms');
-            // Method before rect, and both again here: the rect is accepted in
-            // READY state without being applied.
-            var wanted = playerRect();
-            var rectDiag = { wanted: wanted };
-            try {
-                webapis.avplay.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX');
-                rectDiag.method = 'LETTER_BOX ok';
-            } catch (e) { rectDiag.method = 'FAILED ' + e.name + ': ' + e.message; }
-            try {
-                webapis.avplay.setDisplayRect(wanted[0], wanted[1], wanted[2], wanted[3]);
-                rectDiag.rect = 'ok';
-            } catch (e) { rectDiag.rect = 'FAILED ' + e.name + ': ' + e.message; }
-            try { rectDiag.state = webapis.avplay.getState(); } catch (e) { /* ignore */ }
-            report('avplay-rect', rectDiag);
-            // The player now carries the picture in both branches: sound:false
-            // mutes it and does not stop it being opened.
-            takeMute(!view.sound);
-            webapis.avplay.play();
-
-            // Keep re-applying until PLAYING, then confirm once.
-            stopTimer(settleTimer);
-            var tries = 0;
-            var lastErr = null;
-            settleTimer = repeat(function () {
-                tries++;
-                var st = '';
-                try { st = webapis.avplay.getState(); } catch (e) { st = 'state? ' + e.name; }
-                // Reported, never swallowed: a refusal here is the reason
-                // the picture would sit in the wrong place. Re-read each tick:
-                // a lean verdict arriving mid-settle then moves the picture.
-                var now = playerRect();
-                try {
-                    webapis.avplay.setDisplayRect(now[0], now[1], now[2], now[3]);
-                    lastErr = null;
-                } catch (e) {
-                    lastErr = e.name + ': ' + e.message;
-                }
-                if (st === 'PLAYING' || tries > 20) {
-                    stopTimer(settleTimer);
-                    settleTimer = null;
-                    report('avplay-rect-settled',
-                           { state: st, tries: tries, rect: now, rectError: lastErr });
-                }
-            }, 300);
-            player.active = true;
-            player.used = true;
-            log('avplay: playing, sound ' + (view.sound ? 'on' : 'muted'));
-            report('avplay-playing', {});
+            afterPrepare('callback');
         }, function (e) {
+            if (superseded('a prepare failure')) { return; }
             log('avplay prepare failed: ' + e);
             report('avplay-prepare-failed', { error: String(e) });
+            stopTimer(readyTimer);
+            readyTimer = null;
             if (onFail) { onFail(); }
         });
+
+        var waits = 0;
+        var pushErr = null;
+        readyTimer = repeat(function () {
+            if (gen !== player.gen) { stopTimer(readyTimer); readyTimer = null; return; }
+            waits++;
+            var st = '';
+            try { st = webapis.avplay.getState(); } catch (e) { /* not up yet */ }
+            var r = playerRect();
+            try {
+                webapis.avplay.setDisplayMethod(displayMethod(r));
+                webapis.avplay.setDisplayRect(r[0], r[1], r[2], r[3]);
+                pushErr = null;
+            } catch (e) { pushErr = e.name + ': ' + e.message; }
+            if (st === 'READY' || st === 'PLAYING' || st === 'PAUSED') {
+                afterPrepare('state ' + st);
+            } else if (waits > 150) {
+                stopTimer(readyTimer);
+                readyTimer = null;
+                log('avplay: no READY state after 30 s, last ' + (st || 'unknown'));
+                report('avplay-never-ready',
+                       { state: st || null, rect: r, rectError: pushErr });
+            }
+        }, 200);
     } catch (e) {
         log('avplay threw: ' + e.name);
         if (onFail) { onFail(); }
@@ -601,6 +692,7 @@ function stopAvplay() {
     // Closing a player that was never opened resets the video plane, and the TV
     // then falls back to its HDMI input instead of the app the viewer came from.
     if (!player.opened) { return; }
+    player.gen++;
     player.opened = false;
     player.active = false;
     try { webapis.avplay.stop(); } catch (e) { /* ignore */ }
@@ -959,7 +1051,9 @@ function restartPlayer() {
 }
 
 function updateTitle() {
-    title.textContent = CFG.showName ? (currentCamera().name || '') : '';
+    var labelled = !view.lean;
+    title.textContent = (CFG.showName && !labelled) ? (currentCamera().name || '') : '';
+    barDot.style.display = (CFG.showDot && !labelled) ? '' : 'none';
 }
 
 function showMosaic() {
@@ -1629,9 +1723,10 @@ function renderAppList() {
     appsFootEl.textContent = '';
 
     fetchInstalledApps(function (list, reason) {
-        // No fallback to getAppsInfo. It answers with package ids, which look
-        // right and never match: with Netflix playing, RN1MCdNq8t.Netflix reads
-        // visible:false while 11101200001 reads visible:true. Showing an error
+        // No fallback to getAppsInfo. It answers with package ids, and a store
+        // application does not match on that form: with Netflix playing,
+        // RN1MCdNq8t.Netflix reads visible:false while 11101200001 reads
+        // visible:true. Showing an error
         // is preferable to handing over ids that will never match.
         //
         // A refusal, a timeout and an empty answer each get their own message.
