@@ -9,6 +9,10 @@
 #               leading tile stays empty and lean mode leaves the screen dark.
 #   mjpegUrl    the small mosaic tiles, the only pictures the app decodes itself
 #   hlsUrl      a fallback, used only when a camera has no videoUrl
+#   aspect      optional, "16:9" or "4:3" or a number. A stream that signals no
+#               pixel aspect is drawn at its coded ratio: a camera squeezing a
+#               16:9 view into 704x576 then comes out narrow, with bars. Set the
+#               real ratio here and the picture is stretched to it.
 #
 # Serve videoUrl from a producer that keeps several segments in its playlist.
 # go2rtc's own HLS window is two segments, and the player then waits for media
@@ -47,16 +51,17 @@ ignoreApps: []
 # > Device Connection Manager, and that row decides whether the app is allowed.
 # The connection that raises the prompt is refused whatever the viewer answers.
 # The app reconnects once by itself. The token is a port-8002 mechanism and is
-# probably ignored on 8001; it stays to survive an install.
+# probably ignored on 8001. The app keeps the one it is handed in localStorage,
+# which an install leaves alone.
 remoteName: "camera-pip"
 remoteToken: ""
 # How long the red-key screen waits for the TV. Generous: the set may be holding
 # the connection while it asks the viewer to allow the device.
 appListTimeoutMs: 30000
 
-# showName and showDot cover the top bar and the tile badges; with showClock off
-# as well the bar draws nothing and is hidden. showHint is the key legend along
-# the bottom and is separate from all three.
+# showName covers the top bar and the badges on the small tiles; showDot is the
+# live dot in the bar. With showClock off as well the bar draws nothing and is
+# hidden. showHint is the key legend along the bottom and is separate.
 showName: true
 showDot: true
 showClock: true
