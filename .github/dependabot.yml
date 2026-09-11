@@ -6,13 +6,10 @@ multi-ecosystem-groups:
       interval: weekly
 
 updates:
-  # The actions below are pinned by commit. Without this they are never bumped
-  # and the pin goes stale.
   - package-ecosystem: github-actions
     directory: /
     patterns: ["*"]
     multi-ecosystem-group: deps
-  # The base image the Tizen CLI is built on.
   - package-ecosystem: docker
     directory: /docker
     patterns: ["*"]
