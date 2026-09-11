@@ -2,16 +2,66 @@ name: release
 on:
   push:
     tags: ["v*.*.*"]
-permissions:
-  contents: write
+  workflow_dispatch:
+permissions: {}
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 jobs:
-  release:
-    name: package the widget and publish
+  # The image is built here and nowhere else. The job below runs this one
+  # instead of building its own copy, so a tag builds the Tizen CLI once.
+  image:
+    name: publish the Tizen CLI image
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    # Scoped per job: this one never gets contents: write, and the release job
+    # below never gets packages: write.
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # Plain docker. The login and build-push actions would be two more
+      # third-party actions to pin and keep pinned, for three commands.
+      - name: Log in to ghcr.io
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push
+        id: publish
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/tizen-cli"
+          # A tag publishes the version without its leading v. A hand-started
+          # run publishes under its branch name, with slashes turned into
+          # dashes, which a docker tag does not allow.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            PRIMARY="${GITHUB_REF_NAME#v}"
+          else
+            PRIMARY="${GITHUB_REF_NAME//\//-}"
+          fi
+          docker build -t "$IMAGE:$PRIMARY" docker/
+          docker push "$IMAGE:$PRIMARY"
+          # latest is what build-install.sh pulls, and it follows releases only.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            docker tag "$IMAGE:$PRIMARY" "$IMAGE:latest"
+            docker push "$IMAGE:latest"
+          fi
+          echo "image=$IMAGE:$PRIMARY" >> "$GITHUB_OUTPUT"
+
+  # Skipped on a hand-started branch run: that publishes an image and nothing
+  # else. Only a tag produces a release.
+  release:
+    name: package the widget and publish
+    needs: image
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      packages: read
     steps:
       # persist-credentials: false keeps the write-scoped token out of .git,
       # beyond the reach of the toolchain below. gh authenticates through
@@ -19,17 +69,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      - name: Log in to ghcr.io
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       # Built with no cameras, not from config.example.yaml: that file carries a
       # debugUrl and two webhook addresses. Shows nothing until config.yaml is
       # filled in and it is rebuilt.
       - name: Package the widget
+        env:
+          IMAGE: ${{ needs.image.outputs.image }}
         run: |
           set -euo pipefail
+          docker pull "$IMAGE"
           # The container runs as uid 1000 and the runner is not that uid.
           mkdir -p dist && chmod 777 dist
           printf 'cameras: []\n' > app/config.yaml
-          docker build -t tizen-cli:release docker/
-          docker run --rm -v "$PWD:/work:ro" -v "$PWD/dist:/out" tizen-cli:release
+          docker run --rm -v "$PWD:/work:ro" -v "$PWD/dist:/out" "$IMAGE"
           ls -la dist/
       - name: Publish the release
         env:
