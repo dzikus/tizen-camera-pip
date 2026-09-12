@@ -28,7 +28,10 @@ jobs:
       # Plain docker. The login and build-push actions would be two more
       # third-party actions to pin and keep pinned, for three commands.
       - name: Log in to ghcr.io
-        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_ACTOR: ${{ github.actor }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
       - name: Build and push
         id: publish
         run: |
@@ -70,7 +73,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Log in to ghcr.io
-        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_ACTOR: ${{ github.actor }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
       # Built with no cameras, not from config.example.yaml: that file carries a
       # debugUrl and two webhook addresses. Shows nothing until config.yaml is
       # filled in and it is rebuilt.
