@@ -1,4 +1,4 @@
 pre-commit==4.6.2
-ruff==0.16.7
+ruff==0.16.8
 websocket-client==1.9.2
 pyyaml==6.0.3
