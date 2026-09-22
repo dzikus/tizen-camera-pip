@@ -404,6 +404,18 @@ Only close AVPlay if it was actually opened. Calling `stop()` or `close()` on a
 player that never started resets the video plane, and the TV then falls back to
 its HDMI input instead of returning to the previous app.
 
+`exit()` on its own still leaves the choice of what to show next to the TV, and
+once it chose wrong: with a streaming app behind the camera for about half a
+minute, the close landed on the Smart Hub bar with the film paused underneath,
+and the film played on the moment that app was opened by hand. With
+`restoreApp` on, the app launches the watched app its probe found, by id, over
+`127.0.0.1:8001`, and calls `exit()` once the TV has answered or
+`restoreTimeoutMs` has run out. A launch aimed at a running app brings it
+forward and resumes it. The launch goes out at the last moment on purpose: sent
+earlier, the switch would land while the app is still alive, the platform would
+freeze it in the background, and the exit would never happen. A document that
+goes hidden mid-restore exits at once.
+
 ## Sound
 
 AVPlay on an HLS stream whose audio is genuinely AAC. It is the only transport

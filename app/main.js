@@ -68,6 +68,8 @@ var DEFAULTS = {
     inputGraceMs: 900,
     lifeBar: { show: true, position: 'top' },
     exitDelayMs: 1200,
+    restoreApp: true,
+    restoreTimeoutMs: 1500,
 
     actionUrl: null,
     actions: [],
@@ -816,7 +818,8 @@ var view = {
     leading: 0,
     lean: false,
     decided: false,
-    sound: true
+    sound: true,
+    behind: null
 };
 
 // config.xml asks for 1080p and the page is authored to match. A compositing
@@ -1187,6 +1190,7 @@ function show() {
 
     withBackgroundApp(function (appId) {
         view.lean = !!appId;
+        view.behind = appId || null;
         // Left behind on purpose. Only quit() removes it: a run that is
         // restarted, not closed, leaves the next one this answer.
         noteOnScreen(appId);
@@ -1367,8 +1371,10 @@ function quit(reason) {
     setClass('mosaic', false);
     if (tilesEl) { releaseTiles(); }
 
-    post(CFG.closeWebhook, { reason: reason, layout: view.layout });
-    report('close', { reason: reason, layout: view.layout });
+    var behind = appBehindUs();
+    post(CFG.closeWebhook, { reason: reason, layout: view.layout, restore: behind });
+    report('close', { reason: reason, layout: view.layout, restore: behind,
+                      restoreApp: CFG.restoreApp !== false });
 
     setClass('visible', false);
 
@@ -1382,10 +1388,64 @@ function quit(reason) {
     // clearAllTimers(), or the exit would never happen.
     var delay = player.used ? (CFG.exitDelayMs || 1200) : 260;
     setTimeout(function () {
-        try { tizen.application.getCurrentApplication().exit(); }
-        catch (e) { log('exit threw: ' + e.name); }
+        if (CFG.restoreApp !== false && behind) { restoreThenExit(behind); }
+        else { exitNow(); }
     }, delay);
 }
+
+function exitNow() {
+    try { tizen.application.getCurrentApplication().exit(); }
+    catch (e) { log('exit threw: ' + e.name); }
+}
+
+function appBehindUs() {
+    if (fgProbe.found) { return fgProbe.found; }
+    return (view.behind && view.behind !== VERDICT_UNKNOWN) ? view.behind : null;
+}
+
+var restoring = false;
+
+function restoreThenExit(appId) {
+    var startedAt = new Date().getTime();
+    var left = false;
+    var timeout = CFG.restoreTimeoutMs || 1500;
+
+    function leave(how) {
+        if (left) { return; }
+        left = true;
+        var ms = new Date().getTime() - startedAt;
+        log('restore ' + appId + ': ' + how + ', ' + ms + ' ms');
+        report('restore', { app: appId, how: how, ms: ms });
+        setTimeout(exitNow, 150);
+    }
+
+    restoring = true;
+    var xhr = new XMLHttpRequest();
+    try {
+        xhr.open('POST', 'http://127.0.0.1:8001/api/v2/applications/' + appId, true);
+        xhr.timeout = timeout;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) { return; }
+            leave('HTTP ' + xhr.status);
+            releaseXhr(xhr);
+        };
+        xhr.ontimeout = xhr.onerror = function () {
+            leave('no answer');
+            releaseXhr(xhr);
+        };
+        xhr.send();
+    } catch (e) {
+        leave('threw ' + e.name);
+    }
+    setTimeout(function () { leave('deadline'); }, timeout + 100);
+}
+
+document.addEventListener('visibilitychange', function () {
+    if (document.hidden && restoring) {
+        log('hidden while restoring - leaving now');
+        exitNow();
+    }
+});
 
 var KEY = {
     LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40,

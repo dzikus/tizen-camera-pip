@@ -114,6 +114,13 @@ closeWebhook: "http://homeassistant.local:8123/api/webhook/camera_pip_close"
 exitDelayMs: 1200
 # Keys are ignored for this long after a launch.
 inputGraceMs: 900
+# On close, the app launches the watched app it found on screen by name, over
+# the TV's own REST API, and exits once the TV has answered. exit() on its own
+# leaves the choice to the TV, which has landed on the Smart Hub bar with the
+# film paused underneath. false trusts the TV. restoreTimeoutMs caps the wait
+# for that answer; the app leaves without one when it runs out.
+restoreApp: true
+restoreTimeoutMs: 1500
 
 # Without debugUrl the app logs nothing at all: the trace only ever leaves in a
 # report, and this TV has no inspector to print to.

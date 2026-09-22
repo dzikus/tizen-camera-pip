@@ -40,9 +40,19 @@ automation:
           media_content_type: app
           media_content_id: <APP_ID>
 
-      # Swallow repeat events from the same ring.
-      - delay:
-          seconds: 8
+      # Hold here while the app is on screen. A second launch aimed at a
+      # running widget reloads it from scratch; the app posts closeWebhook
+      # when it leaves, and that ends the wait. The cap covers a run that
+      # never got to post it.
+      - wait_for_trigger:
+          - trigger: webhook
+            webhook_id: camera_pip_close
+            allowed_methods:
+              - POST
+            local_only: true
+        timeout:
+          seconds: 50
+        continue_on_timeout: true
 
   # The app sends an action id and its layout; what the ids mean lives here, and
   # the app stays portable.
