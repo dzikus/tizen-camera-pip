@@ -6,30 +6,39 @@ multi-ecosystem-groups:
       interval: weekly
 
 updates:
-  # The actions below are pinned by commit. Without this they are never bumped
-  # and the pin goes stale.
   - package-ecosystem: github-actions
     directory: /
     patterns: ["*"]
     multi-ecosystem-group: deps
-  # The base image the Tizen CLI is built on.
+    cooldown:
+      default-days: 7
   - package-ecosystem: docker
     directory: /docker
     patterns: ["*"]
     multi-ecosystem-group: deps
+    cooldown:
+      default-days: 7
   - package-ecosystem: docker
     directory: /.devcontainer
     patterns: ["*"]
     multi-ecosystem-group: deps
+    cooldown:
+      default-days: 7
   - package-ecosystem: devcontainers
     directory: /
     patterns: ["*"]
     multi-ecosystem-group: deps
+    cooldown:
+      default-days: 7
   - package-ecosystem: pip
     directory: /.devcontainer
     patterns: ["*"]
     multi-ecosystem-group: deps
+    cooldown:
+      default-days: 7
   - package-ecosystem: pre-commit
     directory: /
     patterns: ["*"]
     multi-ecosystem-group: deps
+    cooldown:
+      default-days: 7
