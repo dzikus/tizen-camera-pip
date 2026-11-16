@@ -236,6 +236,31 @@ is automatic: a fuse in `localStorage` notices when a run dies shortly after
 touching the video plane, and after two such deaths in a row the app stops
 trying (`tvWindowFuse`, `tvWindowFuseTrips`, `tvWindowSettleMs`).
 
+A 2020 The Frame, QE75LS03TAUXXH on software T-NKMDEUC-2743.0, tolerates it.
+Measured with `camera-corner` over a live input, the app stays on screen with
+the live picture behind it. The
+player in the card does not combine with it: the camera shows in the card and
+the live picture around it goes black, because both want the one video plane.
+`cornerPicture: mjpeg` draws the camera's `mjpegUrl` in the card instead and
+leaves the plane to the live source, and that one works: camera in the corner,
+live picture around it, no sound. The default stays `player`.
+
+Frigate's own MJPEG endpoint runs at the detect frame rate, measured 4.8 fps at
+480x360 with detect at 5 fps. go2rtc serves a full-rate one, but only from a
+stream that transcodes:
+
+```yaml
+go2rtc:
+  streams:
+    front_mjpeg:
+      - ffmpeg:front#video=mjpeg#width=960
+```
+
+`http://<go2rtc>:1984/api/stream.mjpeg?src=front_mjpeg` then measured 960x720
+at about 30 fps. Adding `#hardware=vaapi` to that line failed in go2rtc with
+`hwupload: A hardware device reference is required`, so it transcodes on the
+CPU.
+
 ## Diagnostics
 
 `sdb shell` is closed on this TV in ordinary developer mode. There is no `dlog`
