@@ -55,6 +55,12 @@ var DEFAULTS = {
     smallSize: { w: 600, h: 338 },
     largeSize: { w: 1180, h: 664 },
     startEnlarged: false,
+    // What fills the camera-corner card. 'player' puts AVPlay there, which
+    // shares the one video plane with tvwindow. Measured on a 2020 The Frame:
+    // the camera shows in the card and the live picture around it goes black.
+    // 'mjpeg' draws the camera's mjpegUrl in the card instead and leaves the
+    // plane to the live source. A camera without an mjpegUrl uses the player.
+    cornerPicture: 'player',
     sourceWindow: { corner: 'top-right', margin: 56, w: 640, h: 360 },
 
     tvWindowZ: 'BEHIND',
@@ -264,9 +270,10 @@ function clearAllTimers() {
 var TOKEN_KEY = 'pipRemoteToken';
 
 /*
- * show() kills the app on this model, and the corner layouts have never been
- * run anywhere else. The fuse stops an experiment turning into an unbootable
- * loop: two deaths in a row and resolveLayout() falls back to fullscreen.
+ * show() kills the app on this model. A 2020 The Frame keeps it alive in
+ * camera-corner, so it is per-model policy. The fuse stops an experiment
+ * turning into an unbootable loop: two deaths in a row and resolveLayout()
+ * falls back to fullscreen.
  */
 var FUSE_KEY = 'pipTvWindowFailures';
 var ATTEMPT_KEY = 'pipTvWindowAttempt';
@@ -505,9 +512,39 @@ function fitToAspect(r, aspect) {
             r[1] + Math.round((r[3] - h) / 2), w, h];
 }
 
+// The corner card's rectangle in page pixels, the same numbers layout() gives
+// the card. camera-corner puts the player here instead of in a mosaic tile.
+function cornerRect() {
+    var size = (view.enlarged ? CFG.largeSize : CFG.smallSize) || { w: 600, h: 338 };
+    var m = CFG.margin || 0;
+    var x = view.corner.indexOf('left') > -1 ? m : SCREEN_W - size.w - m;
+    var y = view.corner.indexOf('top') === 0 ? m : SCREEN_H - size.h - m;
+    return [x, y, size.w, size.h];
+}
+
+function cornerUsesMjpeg() {
+    var cam = currentCamera();
+    return view.layout === 'camera-corner' && CFG.cornerPicture === 'mjpeg' &&
+           !!(cam && cam.mjpegUrl);
+}
+
+// Puts whatever fills the corner card where the card now is.
+function placeCornerPicture() {
+    if (player.opened) { applyPlayerRect(); }
+    var tile = tilesEl.firstChild;
+    if (!cornerUsesMjpeg() || !tile) { return; }
+    var r = cornerRect();
+    tile.style.left = r[0] + 'px';
+    tile.style.top = r[1] + 'px';
+    tile.style.width = r[2] + 'px';
+    tile.style.height = r[3] + 'px';
+}
+
 function playerRect() {
-    return fitToAspect(tileRects(cameraList().length)[0],
-                       cameraAspect(currentCamera()));
+    var base = view.layout === 'camera-corner'
+        ? cornerRect()
+        : tileRects(cameraList().length)[0];
+    return fitToAspect(base, cameraAspect(currentCamera()));
 }
 
 // LETTER_BOX ignores a rect smaller than the screen here: full screen lands
@@ -1014,6 +1051,10 @@ function playerUrl() {
 function startPlayer(reopening) {
     var url = playerUrl();
     player.failed = false;
+    if (cornerUsesMjpeg()) {
+        log('camera-corner: MJPEG in the card, video plane left to the live source');
+        return;
+    }
     if (!url || typeof webapis === 'undefined' || !webapis.avplay) {
         var why = url ? 'no avplay on this set' : 'camera has no videoUrl or hlsUrl';
         log('player not started: ' + why);
@@ -1072,6 +1113,24 @@ function showMosaic() {
         log(player.failed ? 'lean: no player, leaving the screen dark'
                           : 'lean: hardware video, no MJPEG');
         applyPlayerRect();
+        return;
+    }
+
+    // camera-corner: the card is the only thing on screen. The mosaic spans
+    // the screen and would paint its name label over the live picture.
+    if (view.layout === 'camera-corner') {
+        releaseTiles();
+        if (cornerUsesMjpeg()) {
+            var src = currentCamera().mjpegUrl;
+            var tile = document.createElement('div');
+            tile.className = 'tile';
+            var img = document.createElement('img');
+            img.src = src + (src.indexOf('?') > -1 ? '&' : '?') +
+                      '_t=' + new Date().getTime();
+            tile.appendChild(img);
+            tilesEl.appendChild(tile);
+        }
+        placeCornerPicture();
         return;
     }
 
@@ -1177,7 +1236,7 @@ function show() {
     view.leading = Math.min(CFG.primaryCamera || 0, CFG.cameras.length - 1);
     setClass('avplay', true);
     setClass('mosaic', true);
-    setClass('full', true);
+    setClass('full', view.layout !== 'camera-corner');
     setClass('visible', true);
     view.sound = (CFG.sound !== false);
 
@@ -1477,6 +1536,7 @@ function toggleSize() {
     if (view.layout !== 'camera-corner') { return false; }
     view.enlarged = !view.enlarged;
     layout();
+    placeCornerPicture();
     resetDismissTimer();
     return true;
 }
@@ -1489,6 +1549,7 @@ function moveCorner(vertical, horizontal) {
     var parts = view.corner.split('-');
     view.corner = (vertical || parts[0]) + '-' + (horizontal || parts[1]);
     layout();
+    placeCornerPicture();
 }
 
 function bindKeys() {
