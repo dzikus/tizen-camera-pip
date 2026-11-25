@@ -144,6 +144,12 @@ margin: 56
 smallSize: { w: 600, h: 338 }
 largeSize: { w: 1180, h: 664 }
 startEnlarged: false
+# What fills the camera-corner card. player puts the hardware decoder there,
+# but it shares the one video plane with the live source, and the live picture
+# around the card can go black. mjpeg draws the camera's mjpegUrl in the card
+# instead and leaves the plane to the live source: no sound, and the frame rate
+# is whatever mjpegUrl serves. A camera with no mjpegUrl still uses the player.
+cornerPicture: player
 sourceWindow: { corner: top-right, margin: 56, w: 640, h: 360 }
 # Only read by the corner layouts. tvWindowZ is handed to tvwindow.show() in
 # camera-corner; source-corner always uses FRONT. preferSource matches one of

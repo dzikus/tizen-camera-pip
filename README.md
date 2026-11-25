@@ -40,7 +40,8 @@ the design comes from.
 ## Which TVs
 
 Tested on one set: UE65NU8042, 2018, Tizen 4.0. Every measurement in this
-README comes from that TV.
+README comes from that TV. The 2020 The Frame result under Layouts is a
+user's report.
 
 What decides whether a set installs the widget is the distributor certificate
 it was signed with. This set accepts the old chain (`Tizen Public Distributor
@@ -236,6 +237,44 @@ is automatic: a fuse in `localStorage` notices when a run dies shortly after
 touching the video plane, and after two such deaths in a row the app stops
 trying (`tvWindowFuse`, `tvWindowFuseTrips`, `tvWindowSettleMs`).
 
+A user reports that a 2020 The Frame (QE75LS03TAUXXH, software
+T-NKMDEUC-2743.0, installed through Apps2Samsung) tolerates `tvwindow`. With
+`camera-corner` over a live input, the app stays on screen with the live
+picture behind it. Nobody has repeated this here. That set differs from this
+one in model year, Tizen version and signing certificate, so one run cannot
+say which of the three matters.
+
+On that set the player in the card and the live picture need the same video
+plane: the camera appears in the card and the live picture around it goes
+black. `cornerPicture: mjpeg` draws the camera's `mjpegUrl` in the card instead
+and leaves the plane to the live source. With it, the user saw the camera in
+the corner and the live picture around it, without sound. The default is
+`player`, and a camera without an `mjpegUrl` uses the player either way.
+
+Three limits follow from the code and have not been measured:
+
+- `tvwindow` shows only an input or the tuner. The card can sit over live TV
+  or HDMI, never over an app such as Netflix.
+- With an app from `watchApps` on screen, lean mode draws no MJPEG and
+  `cornerPicture: mjpeg` starts no player, so the card stays empty.
+- `cornerPicture: mjpeg` still calls `tvwindow.show()`, which is what unloads
+  the app on the UE65NU8042.
+
+The same user measured Frigate's own MJPEG endpoint at the detect frame rate:
+4.8 fps at 480x360 with detect at 5 fps. go2rtc serves the full frame rate,
+but only from a stream that transcodes:
+
+```yaml
+go2rtc:
+  streams:
+    front_mjpeg:
+      - ffmpeg:front#video=mjpeg#width=960
+```
+
+`http://<go2rtc>:1984/api/stream.mjpeg?src=front_mjpeg` then gave 960x720 at
+about 30 fps. The transcode runs on the CPU: adding `#hardware=vaapi` failed in
+go2rtc with `hwupload: A hardware device reference is required`.
+
 ## Diagnostics
 
 `sdb shell` is closed on this TV in ordinary developer mode. There is no `dlog`
@@ -322,10 +361,11 @@ A partner certificate does not help. `show()` returns success, not
 `SecurityError`, and no permission gate is involved; a partner certificate
 raises privilege level, and this is lifecycle policy. A sweep of the Samsung
 developer forum, Stack Overflow and GitHub found no report of a partner
-certificate keeping a `tvwindow` overlay alive. The setups where an overlay
-does survive run on signage and hospitality panels, where the policy is
-inverted. Ruled out on the device: `prelaunch.support` metadata, the `tv.pip`
-feature declaration, and the `tv.audio` and `tv.channel` privileges.
+certificate keeping a `tvwindow` overlay alive. Overlays survive on
+signage and hospitality panels, where the policy is inverted, and a user
+reports one consumer set that keeps them (see Layouts). Ruled out on the
+device: `prelaunch.support` metadata, the `tv.pip` feature declaration, and
+the `tv.audio` and `tv.channel` privileges.
 
 A tiled mosaic of several hardware pictures. `webapis.avplaystore.getPlayer()`
 does hand out multiple players, and both open, prepare and play, but there is
