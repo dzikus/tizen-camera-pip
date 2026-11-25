@@ -56,10 +56,10 @@ var DEFAULTS = {
     largeSize: { w: 1180, h: 664 },
     startEnlarged: false,
     // What fills the camera-corner card. 'player' puts AVPlay there, which
-    // shares the one video plane with tvwindow. Measured on a 2020 The Frame:
-    // the camera shows in the card and the live picture around it goes black.
-    // 'mjpeg' draws the camera's mjpegUrl in the card instead and leaves the
-    // plane to the live source. A camera without an mjpegUrl uses the player.
+    // shares the one video plane with tvwindow. Reported on a user's 2020 The
+    // Frame: the camera shows in the card and the live picture around it goes
+    // black. 'mjpeg' draws the camera's mjpegUrl in the card instead and leaves
+    // the plane to the live source. A camera without an mjpegUrl uses the player.
     cornerPicture: 'player',
     sourceWindow: { corner: 'top-right', margin: 56, w: 640, h: 360 },
 
@@ -270,10 +270,10 @@ function clearAllTimers() {
 var TOKEN_KEY = 'pipRemoteToken';
 
 /*
- * show() kills the app on this model. A 2020 The Frame keeps it alive in
- * camera-corner, so it is per-model policy. The fuse stops an experiment
- * turning into an unbootable loop: two deaths in a row and resolveLayout()
- * falls back to fullscreen.
+ * show() kills the app on this model. A user reports that a 2020 The Frame
+ * keeps it alive in camera-corner. The fuse stops an experiment turning into
+ * an unbootable loop: two deaths in a row and resolveLayout() falls back to
+ * fullscreen.
  */
 var FUSE_KEY = 'pipTvWindowFailures';
 var ATTEMPT_KEY = 'pipTvWindowAttempt';
